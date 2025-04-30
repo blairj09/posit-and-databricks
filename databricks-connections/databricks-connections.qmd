@@ -1,0 +1,48 @@
+---
+title: "Databricks Connections"
+format: html
+jupyter: python
+---
+
+```{r setup}
+library(tidyverse)
+library(sparklyr)
+```
+
+A simple example notebook highlighting how to connect to Databricks using a variety of tools and SDKs.
+# R Connections
+## sparklyr connection
+These connections are best for working interactively with Databricks compute clusters. This is only necessary when actually doing something that requires Spark functionality.
+```{r}
+sc <- spark_connect(
+  cluster_id = "0429-230927-itlk4yp",
+  method = "databricks_connect"
+)
+```
+
+## ODBC Connection
+```{r}
+
+```
+
+## Brickster
+
+
+# Python Connections
+## Pyspark Connection
+```{python}
+
+```
+
+## Python SDK
+```{python}
+from databricks.sdk import WorkspaceClient
+
+w = WorkspaceClient()
+
+for c in w.clusters.list():
+  print(f"Cluster name: {c.cluster_name} - {c.cluster_id}")
+```
+
+## Chatlas
+

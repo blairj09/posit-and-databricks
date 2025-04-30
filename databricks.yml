@@ -1,0 +1,19 @@
+# This is a Databricks asset bundle definition for posit-and-databricks.
+# The Databricks extension requires databricks.yml configuration file.
+# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+
+bundle:
+  name: posit-and-databricks
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-138962681435081.1.azuredatabricks.net
+
+  ## Optionally, there could be 'staging' or 'prod' targets here.
+  #
+  # prod:
+  #   workspace:
+  #     host: https://adb-138962681435081.1.azuredatabricks.net
