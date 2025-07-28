@@ -1,0 +1,477 @@
+---
+title: "Exploratory Data Analysis"
+format: html
+jupyter: python3
+---
+
+```{python}
+import ibis
+import os
+from dotenv import load_dotenv
+from databricks.sdk.core import Config
+
+load_dotenv()
+```
+
+Connect to Databricks with [Ibis](https://ibis-project.org/):
+```{python}
+# Connect to Databricks Data
+cfg = Config()
+
+con = ibis.databricks.connect(
+  http_path = os.getenv("DATABRICKS_HTTP_PATH"),
+  server_hostname = cfg.host,
+  credentials_provider = lambda: cfg.authenticate,
+  catalog=os.getenv("DATABRICKS_CATALOG", "jb-demos"),
+  schema=os.getenv("DATABRICKS_SCHEMA", "sales_example"),
+  memtable_volume=os.getenv("DATABRICKS_MEMTABLE_VOLUME", "ibis_memtable")
+)
+```
+
+List tables in the database:
+```{python}
+tables = con.list_tables()
+tables
+```
+
+Connect to the `sales` table:
+```{python}
+sales = con.table("sales")
+```
+
+How many rows and what are the first few rows of the `sales` table?
+```{python}
+sales.count().execute()
+sales.head().execute()
+```
+
+:::{.callout-note}
+The remainder of this document was written with significant help from Positron Assistant.
+:::
+
+## Sales Analysis by Region
+
+Compare total sales amount by region:
+```{python}
+# Sales by region
+region_sales = (
+    sales
+    .group_by("region")
+    .aggregate(
+        total_sales=sales.total_amount.sum(),
+        avg_sales=sales.total_amount.mean(),
+        transaction_count=sales.count(),
+        avg_transaction_value=sales.total_amount.mean()
+    )
+    .order_by(ibis.desc("total_sales"))
+)
+region_sales.execute()
+```
+
+Sales performance metrics by region:
+```{python}
+# More detailed regional analysis
+region_metrics = (
+    sales
+    .group_by("region")
+    .aggregate(
+        total_sales=sales.total_amount.sum(),
+        total_transactions=sales.count(),
+        avg_transaction_value=sales.total_amount.mean(),
+        total_quantity=sales.quantity.sum(),
+        unique_customers=sales.customer_id.nunique(),
+        avg_discount=sales.discount_percent.mean()
+    )
+    .mutate(
+        sales_per_customer=lambda t: t.total_sales / t.unique_customers
+    )
+    .order_by(ibis.desc("total_sales"))
+)
+region_metrics.execute()
+```
+
+Sales by region and channel:
+```{python}
+# Sales by region and sales channel
+region_channel = (
+    sales
+    .group_by(["region", "sales_channel"])
+    .aggregate(
+        total_sales=sales.total_amount.sum(),
+        transaction_count=sales.count()
+    )
+    .order_by(["region", ibis.desc("total_sales")])
+)
+
+region_channel.execute()
+```
+
+## Sales Visualization
+
+```{python}
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import pandas as pd
+
+# First, let's get sales data by region and time period
+monthly_sales = (
+    sales
+    .mutate(
+        month = sales.date.month(),
+        year = sales.date.year(),
+        year_month = sales.date.strftime('%Y-%m')
+    )
+    .group_by(['region', 'year_month', 'year', 'month'])
+    .aggregate(
+        total_sales=sales.total_amount.sum(),
+        transaction_count=ibis._.count(),  # Fixed: use ibis._.count() instead of sales.count()
+        avg_transaction_value=sales.total_amount.mean()
+    )
+    .order_by(['year', 'month', 'region'])
+)
+
+# Execute and convert to pandas for easier plotting
+monthly_data = monthly_sales.execute()
+monthly_data['date'] = pd.to_datetime(monthly_data['year_month'])
+
+# Create the main time series plot
+fig = px.line(
+    monthly_data, 
+    x='date', 
+    y='total_sales',
+    color='region',
+    title='Regional Sales Performance Over Time',
+    labels={
+        'total_sales': 'Total Sales ($)',
+        'date': 'Date',
+        'region': 'Region'
+    },
+    width=1000,
+    height=600
+)
+
+# Customize the plot
+fig.update_layout(
+    plot_bgcolor='white',
+    hovermode='x unified',
+    legend=dict(
+        yanchor="top",
+        y=0.99,
+        xanchor="left",
+        x=0.01
+    )
+)
+
+fig.update_traces(line=dict(width=3))
+fig.show()
+```
+
+```{python}
+# Create a subplot with multiple metrics
+fig2 = make_subplots(
+    rows=2, cols=2,
+    subplot_titles=('Monthly Sales by Region', 'Transaction Count', 
+                   'Average Transaction Value', 'Market Share'),
+    specs=[[{"secondary_y": False}, {"secondary_y": False}],
+           [{"secondary_y": False}, {"secondary_y": False}]]
+)
+
+# Add traces for each region
+colors = px.colors.qualitative.Set1
+regions = monthly_data['region'].unique()
+
+for i, region in enumerate(regions):
+    region_data = monthly_data[monthly_data['region'] == region]
+    color = colors[i % len(colors)]
+    
+    # Monthly sales
+    fig2.add_trace(
+        go.Scatter(x=region_data['date'], y=region_data['total_sales'],
+                  name=region, line=dict(color=color),
+                  showlegend=True),
+        row=1, col=1
+    )
+    
+    # Transaction count
+    fig2.add_trace(
+        go.Scatter(x=region_data['date'], y=region_data['transaction_count'],
+                  name=region, line=dict(color=color),
+                  showlegend=False),
+        row=1, col=2
+    )
+    
+    # Average transaction value
+    fig2.add_trace(
+        go.Scatter(x=region_data['date'], y=region_data['avg_transaction_value'],
+                  name=region, line=dict(color=color),
+                  showlegend=False),
+        row=2, col=1
+    )
+
+fig2.update_layout(height=800, title_text="Comprehensive Regional Sales Dashboard")
+fig2.show()
+```
+
+```{python}
+# Create a heatmap showing sales by region and month
+pivot_data = monthly_data.pivot_table(
+    values='total_sales', 
+    index='region', 
+    columns='year_month', 
+    aggfunc='sum'
+)
+
+fig3 = px.imshow(
+    pivot_data.values,
+    labels=dict(x="Month", y="Region", color="Sales"),
+    x=pivot_data.columns,
+    y=pivot_data.index,
+    title="Sales Heatmap by Region and Month",
+    color_continuous_scale='RdYlBu_r'
+)
+
+fig3.update_layout(width=1200, height=400)
+fig3.show()
+```
+
+```{python}
+# Summary analysis
+print("Regional Sales Performance Summary:")
+print("=" * 50)
+
+# Calculate summary statistics
+summary_stats = (
+    monthly_data
+    .groupby('region')
+    .agg({
+        'total_sales': ['sum', 'mean', 'std'],
+        'transaction_count': 'sum',
+        'avg_transaction_value': 'mean'
+    })
+    .round(2)
+)
+
+print(summary_stats)
+
+# Find best and worst performing months for each region
+best_months = (
+    monthly_data
+    .loc[monthly_data.groupby('region')['total_sales'].idxmax()]
+    [['region', 'year_month', 'total_sales']]
+)
+
+worst_months = (
+    monthly_data
+    .loc[monthly_data.groupby('region')['total_sales'].idxmin()]
+    [['region', 'year_month', 'total_sales']]
+)
+
+print("\nBest performing months by region:")
+print(best_months)
+print("\nWorst performing months by region:")
+print(worst_months)
+```
+
+## Product Performance Analysis
+
+Now let's analyze sales performance by product to identify which products are driving revenue.
+
+```{python}
+# Product performance analysis
+product_performance = (
+    sales
+    .group_by("product")
+    .aggregate(
+        total_sales=sales.total_amount.sum(),
+        total_quantity=sales.quantity.sum(),
+        avg_price=sales.unit_price.mean(),
+        transaction_count=ibis._.count(),
+        avg_discount=sales.discount_percent.mean()
+    )
+    .mutate(
+        revenue_per_transaction=lambda t: t.total_sales / t.transaction_count
+    )
+    .order_by(ibis.desc("total_sales"))
+)
+
+product_data = product_performance.execute()
+print("Top 10 Products by Revenue:")
+print(product_data.head(10))
+```
+
+```{python}
+# Product sales over time
+product_monthly = (
+    sales
+    .mutate(
+        year_month = sales.date.strftime('%Y-%m'),
+        month = sales.date.month(),
+        year = sales.date.year()
+    )
+    .group_by(['product', 'year_month', 'year', 'month'])
+    .aggregate(
+        total_sales=sales.total_amount.sum(),
+        total_quantity=sales.quantity.sum(),
+        transaction_count=ibis._.count()
+    )
+    .order_by(['year', 'month', 'product'])
+)
+
+product_monthly_data = product_monthly.execute()
+product_monthly_data['date'] = pd.to_datetime(product_monthly_data['year_month'])
+```
+
+```{python}
+# Create product performance visualizations
+fig_products = make_subplots(
+    rows=2, cols=2,
+    subplot_titles=('Top 10 Products by Revenue', 'Product Revenue Over Time (Top 5)', 
+                   'Product Quantity vs Revenue', 'Product Transaction Count'),
+    specs=[[{"secondary_y": False}, {"secondary_y": False}],
+           [{"secondary_y": False}, {"secondary_y": False}]]
+)
+
+# 1. Top 10 products bar chart
+top_10_products = product_data.head(10)
+fig_products.add_trace(
+    go.Bar(x=top_10_products['product'], 
+           y=top_10_products['total_sales'],
+           name='Revenue',
+           marker_color='lightblue'),
+    row=1, col=1
+)
+
+# 2. Time series for top 5 products
+top_5_products = product_data.head(5)['product'].tolist()
+colors = px.colors.qualitative.Set1
+
+for i, product in enumerate(top_5_products):
+    product_time_data = product_monthly_data[product_monthly_data['product'] == product]
+    fig_products.add_trace(
+        go.Scatter(x=product_time_data['date'], 
+                  y=product_time_data['total_sales'],
+                  name=product,
+                  line=dict(color=colors[i % len(colors)]),
+                  showlegend=False),
+        row=1, col=2
+    )
+
+# 3. Quantity vs Revenue scatter
+fig_products.add_trace(
+    go.Scatter(x=product_data['total_quantity'], 
+              y=product_data['total_sales'],
+              mode='markers',
+              text=product_data['product'],
+              name='Products',
+              marker=dict(size=8, color='orange'),
+              showlegend=False),
+    row=2, col=1
+)
+
+# 4. Transaction count bar chart
+fig_products.add_trace(
+    go.Bar(x=top_10_products['product'], 
+           y=top_10_products['transaction_count'],
+           name='Transactions',
+           marker_color='lightgreen'),
+    row=2, col=2
+)
+
+fig_products.update_layout(height=800, title_text="Product Performance Dashboard")
+fig_products.update_xaxes(tickangle=45)
+fig_products.show()
+```
+
+```{python}
+# Product profitability analysis
+product_profitability = (
+    sales
+    .group_by("product")
+    .aggregate(
+        total_sales=sales.total_amount.sum(),
+        avg_unit_price=sales.unit_price.mean(),
+        avg_discount=sales.discount_percent.mean(),
+        total_quantity=sales.quantity.sum()
+    )
+    .mutate(
+        revenue_per_unit=lambda t: t.total_sales / t.total_quantity,
+        discount_impact=lambda t: t.avg_unit_price * (t.avg_discount / 100)
+    )
+    .order_by(ibis.desc("revenue_per_unit"))
+)
+
+profitability_data = product_profitability.execute()
+print("Top 10 Products by Revenue per Unit:")
+print(profitability_data.head(10))
+```
+
+```{python}
+# Create heatmap of product performance by region
+product_region = (
+    sales
+    .group_by(['product', 'region'])
+    .aggregate(
+        total_sales=sales.total_amount.sum(),
+        quantity=sales.quantity.sum()
+    )
+    .order_by(['product', 'region'])
+)
+
+product_region_data = product_region.execute()
+
+# Get top 15 products for readability
+top_15_products = product_data.head(15)['product'].tolist()
+filtered_data = product_region_data[product_region_data['product'].isin(top_15_products)]
+
+# Create pivot table for heatmap
+product_region_pivot = filtered_data.pivot_table(
+    values='total_sales', 
+    index='product', 
+    columns='region', 
+    aggfunc='sum',
+    fill_value=0
+)
+
+fig_heatmap = px.imshow(
+    product_region_pivot.values,
+    labels=dict(x="Region", y="Product", color="Sales"),
+    x=product_region_pivot.columns,
+    y=product_region_pivot.index,
+    title="Product Sales by Region (Top 15 Products)",
+    color_continuous_scale='Blues',
+    aspect='auto'
+)
+
+fig_heatmap.update_layout(width=800, height=600)
+fig_heatmap.show()
+```
+
+```{python}
+# Product performance summary
+print("\nProduct Performance Summary:")
+print("=" * 50)
+print(f"Total number of products: {len(product_data)}")
+print(f"Top product by revenue: {product_data.iloc[0]['product']} (${product_data.iloc[0]['total_sales']:,.2f})")
+print(f"Average revenue per product: ${product_data['total_sales'].mean():,.2f}")
+print(f"Median revenue per product: ${product_data['total_sales'].median():,.2f}")
+
+# Top and bottom performers
+print(f"\nTop 5 products by revenue:")
+for i, row in product_data.head(5).iterrows():
+    print(f"  {row['product']}: ${row['total_sales']:,.2f}")
+
+print(f"\nBottom 5 products by revenue:")
+for i, row in product_data.tail(5).iterrows():
+    print(f"  {row['product']}: ${row['total_sales']:,.2f}")
+
+# Calculate revenue concentration
+top_10_revenue = product_data.head(10)['total_sales'].sum()
+total_revenue = product_data['total_sales'].sum()
+concentration = (top_10_revenue / total_revenue) * 100
+
+print(f"\nRevenue concentration:")
+print(f"Top 10 products account for {concentration:.1f}% of total revenue")
+```
+
+

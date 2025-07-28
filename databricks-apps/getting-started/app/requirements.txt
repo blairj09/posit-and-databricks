@@ -1,0 +1,7 @@
+shiny>=0.6.0
+shinywidgets>=0.2.0
+ibis-framework[databricks]>=7.0.0
+pandas>=1.5.0
+plotly>=5.0.0
+python-dotenv>=1.0.0
+databricks-sdk>=0.18.0

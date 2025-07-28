@@ -1,0 +1,13 @@
+command: ['python', '-m', 'shiny', 'run', 'app.py']
+env:
+  - name: 'WAREHOUSE_ID'
+    valueFrom: 'sql_warehouse'
+  - name: 'DATABRICKS_CATALOG'
+    value: 'jb-demos'
+  - name: 'DATABRICKS_SCHEMA'
+    value: 'sales_example'
+  - name: 'DATABRICKS_MEMTABLE_VOLUME'
+    value: 'ibis_memtable'
+resources:
+  sql_warehouse:
+    type: 'sql_warehouse'

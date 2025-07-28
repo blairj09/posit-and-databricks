@@ -1,0 +1,19 @@
+[project]
+name = "example-app"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "databricks-sdk>=0.58.0",
+    "dotenv>=0.9.9",
+    "faker>=37.4.2",
+    "ibis-framework[databricks]>=10.6.0",
+    "plotly>=6.2.0",
+    "plotnine>=0.15.0",
+    "polars>=1.31.0",
+    "shiny>=1.4.0",
+    "shinyswatch>=0.9.0",
+    "shinywidgets>=0.7.0",
+    "streamlit>=1.46.1",
+]
